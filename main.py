@@ -1,8 +1,14 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional
+from bson import ObjectId
 
-app = FastAPI()
+from database import db, create_document, get_documents
+from schemas import Provider, Service, ServiceRequest, Review
+
+app = FastAPI(title="Garden Services API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -12,17 +18,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 def read_root():
-    return {"message": "Hello from FastAPI Backend!"}
+    return {"message": "Garden Services API running"}
 
-@app.get("/api/hello")
-def hello():
-    return {"message": "Hello from the backend API!"}
 
 @app.get("/test")
 def test_database():
-    """Test endpoint to check if database is available and accessible"""
     response = {
         "backend": "✅ Running",
         "database": "❌ Not Available",
@@ -31,38 +34,90 @@ def test_database():
         "connection_status": "Not Connected",
         "collections": []
     }
-    
+
     try:
-        # Try to import database module
-        from database import db
-        
         if db is not None:
             response["database"] = "✅ Available"
-            response["database_url"] = "✅ Configured"
-            response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
+            response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
+            response["database_name"] = getattr(db, "name", None) or "✅ Connected"
             response["connection_status"] = "Connected"
-            
-            # Try to list collections to verify connectivity
             try:
                 collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
+                response["collections"] = collections[:10]
                 response["database"] = "✅ Connected & Working"
             except Exception as e:
-                response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
+                response["database"] = f"⚠️  Connected but Error: {str(e)[:80]}"
         else:
             response["database"] = "⚠️  Available but not initialized"
-            
-    except ImportError:
-        response["database"] = "❌ Database module not found (run enable-database first)"
     except Exception as e:
-        response["database"] = f"❌ Error: {str(e)[:50]}"
-    
-    # Check environment variables
-    import os
+        response["database"] = f"❌ Error: {str(e)[:80]}"
+
     response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
     response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
-    
+
     return response
+
+
+# ---- Providers ----
+@app.post("/providers", status_code=201)
+def create_provider(provider: Provider):
+    provider_id = create_document("provider", provider)
+    return {"id": provider_id}
+
+
+@app.get("/providers")
+def list_providers():
+    items = get_documents("provider")
+    for i in items:
+        i["id"] = str(i.pop("_id"))
+    return items
+
+
+# ---- Services ----
+@app.post("/services", status_code=201)
+def create_service(service: Service):
+    service_id = create_document("service", service)
+    return {"id": service_id}
+
+
+@app.get("/services")
+def list_services():
+    items = get_documents("service")
+    for i in items:
+        i["id"] = str(i.pop("_id"))
+    return items
+
+
+# ---- Service Requests (client requests a service) ----
+@app.post("/requests", status_code=201)
+def create_request(req: ServiceRequest):
+    request_id = create_document("servicerequest", req)
+    return {"id": request_id}
+
+
+@app.get("/requests")
+def list_requests(status: Optional[str] = None):
+    filt = {"status": status} if status else None
+    items = get_documents("servicerequest", filt)
+    for i in items:
+        i["id"] = str(i.pop("_id"))
+    return items
+
+
+# ---- Reviews ----
+@app.post("/reviews", status_code=201)
+def create_review(review: Review):
+    review_id = create_document("review", review)
+    return {"id": review_id}
+
+
+@app.get("/reviews")
+def list_reviews(provider_id: Optional[str] = None):
+    filt = {"provider_id": provider_id} if provider_id else None
+    items = get_documents("review", filt)
+    for i in items:
+        i["id"] = str(i.pop("_id"))
+    return items
 
 
 if __name__ == "__main__":
